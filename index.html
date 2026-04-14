@@ -53,7 +53,7 @@
     }
 
     /* ── Контент ────────────────────────────────────────────── */
-    .content { flex: 1; padding: 16px; overflow-y: auto; }
+    .content-old-replaced { flex: 1; padding: 16px; overflow-y: auto; }
 
     /* ── Карточки меню ──────────────────────────────────────── */
     .menu-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 8px; }
@@ -116,18 +116,83 @@
     .result-card .rc-body  { font-size: 14px; color: #555; }
 
     /* ── Скан-секция ────────────────────────────────────────── */
-    .scan-wrap { position: relative; border-radius: var(--radius); overflow: hidden; background: #000; margin-bottom: 12px; }
-    #scanVideo { width: 100%; display: block; max-height: 240px; object-fit: cover; }
+    .scan-wrap {
+      position: relative;
+      border-radius: var(--radius);
+      overflow: hidden;
+      background: #000;
+      margin-bottom: 12px;
+      /* Высота = 56% ширины экрана — оптимально для портретного режима */
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      max-height: 56vw;
+    }
+    .scan-wrap video {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
     .scan-overlay {
       position: absolute; inset: 0;
       display: flex; align-items: center; justify-content: center;
+      pointer-events: none;
     }
     .scan-frame {
-      width: 160px; height: 160px;
-      border: 3px solid rgba(255,255,255,0.8);
-      border-radius: 12px; box-shadow: 0 0 0 9999px rgba(0,0,0,0.4);
+      /* Рамка = 55% ширины но не больше 180px */
+      width: min(55vw, 180px);
+      height: min(55vw, 180px);
+      border: 3px solid rgba(255,255,255,0.9);
+      border-radius: 14px;
+      box-shadow: 0 0 0 9999px rgba(0,0,0,0.45);
     }
-    .scan-hint { text-align: center; font-size: 13px; color: var(--tg-hint); margin-bottom: 8px; }
+    .scan-hint {
+      text-align: center; font-size: 13px;
+      color: var(--tg-hint); margin-bottom: 8px;
+    }
+
+    /* ── Адаптивные отступы контента ───────────────────────── */
+    .content {
+      flex: 1; overflow-y: auto;
+      padding: clamp(10px, 3vw, 20px);
+      /* Запрещаем контенту вылезать за экран */
+      max-width: 100%;
+      overflow-x: hidden;
+    }
+
+    /* ── Кнопки — минимальная высота для пальца ─────────────── */
+    .btn { min-height: 48px; }
+    .field-input { min-height: 48px; }
+
+    /* ── Форма — не выходит за экран ───────────────────────── */
+    .form-section {
+      background: var(--tg-second);
+      border-radius: var(--radius);
+      padding: clamp(12px, 3vw, 20px);
+      margin-bottom: 12px;
+      width: 100%;
+      box-sizing: border-box;
+    }
+
+    /* ── Строка ввода + кнопка камеры — не обрезается ──────── */
+    .input-camera-row {
+      display: flex;
+      gap: 8px;
+      align-items: stretch;
+      width: 100%;
+    }
+    .input-camera-row .field-input { flex: 1; min-width: 0; }
+    .input-camera-row .cam-btn {
+      flex-shrink: 0;
+      width: 48px; height: 48px;
+      background: var(--tg-btn); color: white;
+      border: none; border-radius: 10px;
+      font-size: 20px; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .input-camera-row .cam-btn:active { opacity: 0.8; }
 
     /* ── Список заказов ─────────────────────────────────────── */
     .order-item {
@@ -283,7 +348,7 @@
       </div>
       <div style="display:flex;gap:8px">
         <input type="text" class="field-input" id="recOrderInput" placeholder="Номер заказа"
-               style="flex:1" onkeypress="if(event.key==='Enter')checkReception()">
+               onkeypress="if(event.key==='Enter')checkReception()">
         <button class="btn" style="width:auto;margin:0;padding:0 16px"
                 onclick="toggleCamera('rec')">📷</button>
       </div>
@@ -321,7 +386,7 @@
       </div>
       <div style="display:flex;gap:8px">
         <input type="text" class="field-input" id="issOrderInput" placeholder="Номер заказа"
-               style="flex:1" onkeypress="if(event.key==='Enter')findIssuance()">
+               onkeypress="if(event.key==='Enter')findIssuance()">
         <button class="btn" style="width:auto;margin:0;padding:0 16px"
                 onclick="toggleCamera('iss')">📷</button>
       </div>
@@ -360,7 +425,7 @@
       </div>
       <div style="display:flex;gap:8px">
         <input type="text" class="field-input" id="retOrderInput" placeholder="Номер заказа"
-               style="flex:1" onkeypress="if(event.key==='Enter')checkReturn()">
+               onkeypress="if(event.key==='Enter')checkReturn()">
         <button class="btn" style="width:auto;margin:0;padding:0 16px"
                 onclick="toggleCamera('ret')">📷</button>
       </div>
