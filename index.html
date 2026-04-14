@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
   <title>ПВЗ — Visa Kapitalbank</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.3.1/jsQR.min.js"></script>
+  <script src="https://unpkg.com/jsqr@1.4.0/dist/jsQR.js"></script>
   <style>
     :root {
       --tg-bg:       var(--tg-theme-bg-color, #ffffff);
@@ -428,7 +428,7 @@
 // ══════════════════════════════════════════
 // КОНФИГ — ВСТАВЬТЕ URL ПОСЛЕ ПУБЛИКАЦИИ
 // ══════════════════════════════════════════
-const API_URL = "https://script.google.com/macros/s/AKfycbxUIzpReaJ2GcMyakxweOcwUE_YRMUEUSQNHZevcc8cN34uj2iO02ovB0TE4s3BPN63/exec";
+const API_URL = "https://script.google.com/macros/s/AKfycbwLAVR7Aaa5p4DXAASi76O2MRy0CTdEua19d9s8dvEjNVaar2fYOL_atvVQEqIiVlKo/exec";
 
 // ══════════════════════════════════════════
 // СОСТОЯНИЕ
@@ -879,7 +879,7 @@ async function api(action, extra) {
     }
 
     const url  = API_URL + "?" + new URLSearchParams(params).toString();
-    const resp = await fetch(url, { method: "GET" });
+    const resp = await fetch(url, { method: "GET", redirect: "follow" });
 
     const text = await resp.text();
 
