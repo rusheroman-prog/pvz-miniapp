@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
   <title>ПВЗ — Visa Kapitalbank</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.3.1/jsQR.min.js"></script>
   <style>
     :root {
       --tg-bg:       var(--tg-theme-bg-color, #ffffff);
@@ -856,29 +856,44 @@ function renderReport(rows) {
 // ══════════════════════════════════════════
 async function api(action, extra) {
   try {
-    const body = Object.assign({ action, tg_id: state.tgId, pvz: state.pvzCode }, extra || {});
-    const resp = await fetch(API_URL, {
-      method:  "POST",
-      headers: { "Content-Type": "application/json" },
-      body:    JSON.stringify(body),
-    });
+    if (API_URL.includes("ВСТАВЬТЕ")) {
+      tg.showAlert("API_URL не настроен! Вставьте URL из GAS Web App.");
+      return {};
+    }
+
+    // Базовые параметры
+    const params = {
+      action,
+      tg_id: state.tgId,
+      pvz:   state.pvzCode || "",
+    };
+
+    // Маппинг дополнительных параметров в d0/d1/d2
+    // GAS принимает только URL-параметры (GET), без body
+    if (extra) {
+      if (extra.order_id !== undefined) params.order_id = extra.order_id;
+      if (extra.cell     !== undefined) params.d0 = extra.cell;
+      if (extra.reason   !== undefined) params.d0 = extra.reason;
+      if (extra.filter   !== undefined) params.d0 = extra.filter;
+      if (extra.row      !== undefined) params.d1 = extra.row;
+    }
+
+    const url  = API_URL + "?" + new URLSearchParams(params).toString();
+    const resp = await fetch(url, { method: "GET" });
 
     const text = await resp.text();
 
-    // Пустой ответ — GAS ещё разворачивается или URL неверный
     if (!text || !text.trim()) {
-      console.error("API пустой ответ для action:", action);
-      tg.showAlert("Сервер недоступен. Проверьте API_URL.");
+      console.error("API пустой ответ:", action);
       return {};
     }
 
     let json;
     try {
       json = JSON.parse(text);
-    } catch(parseErr) {
-      // GAS иногда возвращает HTML-ошибку вместо JSON
-      console.error("Не JSON ответ:", text.substring(0, 200));
-      tg.showAlert("Ошибка формата ответа. Проверьте публикацию Web App.");
+    } catch(pe) {
+      console.error("Не JSON:", text.substring(0, 200));
+      tg.showAlert("Ошибка ответа. Создайте новое развёртывание Web App.");
       return {};
     }
 
@@ -891,10 +906,6 @@ async function api(action, extra) {
 
   } catch(e) {
     console.error("Fetch error:", action, e.message);
-    // Если API_URL — плейсхолдер
-    if (API_URL.includes("ВСТАВЬТЕ")) {
-      tg.showAlert("API_URL не настроен! Вставьте URL из GAS Web App.");
-    }
     return {};
   }
 }
