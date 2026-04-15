@@ -379,3 +379,296 @@ https://script.google.com/macros/s/ВАШ_ID/exec?action=check_auth&tg_id=test&p
   "🌅 Доброе утро! Не собрано: 5 заказов..."
   (молчит если все заказы в статусе Доставляется)
 ```
+# ПВЗ Mini App — Visa Kapitalbank × Uzum Market
+
+Telegram Mini App для операторов пунктов выдачи заказов (ПВЗ).  
+Позволяет принимать, выдавать и оформлять возвраты заказов прямо со смартфона — без отдельного приложения, через Telegram.
+
+![Telegram Mini App](https://img.shields.io/badge/Telegram-Mini%20App-2CA5E0?logo=telegram)
+![Google Apps Script](https://img.shields.io/badge/Backend-Google%20Apps%20Script-4285F4?logo=google)
+![GitHub Pages](https://img.shields.io/badge/Hosting-GitHub%20Pages-181717?logo=github)
+
+---
+
+## Как это работает
+
+```
+Оператор ПВЗ                    Telegram Bot
+     │                               │
+     │  нажимает "Открыть ПВЗ"      │
+     │ ──────────────────────────► │
+     │                               │
+     │      открывается Mini App     │
+     │ ◄────────────────────────── │
+     │                               │
+     ▼
+pvz_miniapp.html (GitHub Pages)
+     │
+     │  GET ?action=...&tg_id=...
+     ▼
+PVZ_WebApp.gs (Google Apps Script Web App)
+     │
+     │  читает / пишет данные
+     ▼
+Google Sheets (Лист ПВЗ)
+```
+
+**Без токенов, без серверов, без баз данных.**  
+Весь бэкенд — один файл Google Apps Script, данные хранятся в Google Sheets.
+
+---
+
+## Экраны
+
+| Экран | Описание |
+|-------|---------|
+| 🔍 Онбординг | Первый вход: поиск и выбор своего ПВЗ |
+| 🏠 Главное меню | Кнопки операций + счётчики по статусам |
+| 📥 Приёмка | Скан QR → проверка → ввод ячейки → подтверждение |
+| 📤 Выдача | Скан QR → показ ячейки хранения → подтверждение |
+| ↩️ Возврат | Скан QR → выбор причины → подтверждение |
+| 📋 Заказы | Список заказов ПВЗ с фильтрами и статусами |
+| 📊 Отчёт | Сводная статистика для ТУ/РУ (по роли) |
+
+---
+
+## Структура кода
+
+Приложение — Single Page Application в одном HTML-файле.  
+Никаких фреймворков, никаких сборщиков.
+
+```
+pvz_miniapp.html
+├── <style>          — CSS, Telegram-переменные темы
+├── HTML-разметка    — 6 экранов (.screen), скрытых по умолчанию
+└── <script>
+    ├── КОНФИГ       — API_URL
+    ├── СОСТОЯНИЕ    — объект state (tgId, pvzCode, role, ...)
+    ├── ИНИЦИАЛИЗАЦИЯ
+    │   ├── init()           — проверка авторизации при старте
+    │   ├── showOnboard()    — экран выбора ПВЗ
+    │   └── showMain()       — главное меню + счётчики
+    ├── НАВИГАЦИЯ
+    │   └── goTo(name)       — переключение экранов
+    ├── КАМЕРА
+    │   ├── toggleCamera()   — вкл/выкл камеры
+    │   ├── scanLoop()       — цикл распознавания QR через jsQR
+    │   └── stopCamera()     — остановка + cancelAnimationFrame
+    ├── ПРИЁМКА
+    │   ├── checkReception() — проверка заказа
+    │   └── saveReception()  — запись приёмки с ячейкой
+    ├── ВЫДАЧА
+    │   ├── findIssuance()   — поиск ячейки хранения
+    │   ├── saveIssuance()   — подтверждение выдачи
+    │   └── resetIssuance()  — сброс формы
+    ├── ВОЗВРАТ
+    │   ├── checkReturn()    — проверка заказа
+    │   ├── selectReason()   — выбор причины
+    │   └── saveReturn()     — запись возврата
+    ├── СПИСОК ЗАКАЗОВ
+    │   ├── loadOrders()     — загрузка с сервера
+    │   ├── filterOrders()   — фильтрация по статусу
+    │   └── renderOrders()   — рендер с XSS-защитой
+    ├── ОТЧЁТ ТУ/РУ
+    │   ├── loadReport()     — загрузка со статистикой
+    │   ├── filterReport()   — фильтрация
+    │   └── renderReport()   — рендер с XSS-защитой
+    └── УТИЛИТЫ
+        ├── api()            — fetch к GAS Web App
+        ├── esc()            — XSS-экранирование HTML
+        └── showResult()     — отображение статус-карточек
+```
+
+---
+
+## Объект `state`
+
+Всё состояние приложения хранится в одном объекте:
+
+```javascript
+const state = {
+  tgId:           // Telegram user ID (из initDataUnsafe)
+  name:           // Имя пользователя из Telegram
+  pvzCode:        // Код ПВЗ (localStorage + сервер)
+  role:           // "Оператор" | "ТУ" | "РУ" | "Администратор"
+  allPvz:         // Список всех ПВЗ (кэш для онбординга)
+  allOrders:      // Список заказов (кэш для фильтрации)
+  recRow:         // Номер строки в Sheets для операции приёмки
+  issRow:         // Номер строки для выдачи
+  retRow:         // Номер строки для возврата
+  selectedReason: // Выбранная причина возврата
+  cameras:        // { rec, iss, ret } — MediaStream объекты
+  rafIds:         // { rec, iss, ret } — RAF ID для cancelAnimationFrame
+}
+```
+
+---
+
+## API (Google Apps Script)
+
+Бэкенд принимает только `GET`-запросы — это сознательное решение:  
+`POST` вызывает CORS preflight, который GAS не обрабатывает → блокировка браузером.  
+`GET` не требует preflight → CORS не мешает.
+
+**Базовый URL:**
+```
+GET https://script.google.com/macros/s/{DEPLOYMENT_ID}/exec
+```
+
+**Параметры, общие для всех запросов:**
+
+| Параметр | Описание |
+|----------|---------|
+| `action` | Название операции |
+| `tg_id` | Telegram ID пользователя |
+| `pvz` | Код ПВЗ оператора |
+
+**Эндпоинты:**
+
+| `action` | Доп. параметры | Описание |
+|----------|---------------|---------|
+| `get_pvz_list` | — | Список всех кодов ПВЗ из таблицы |
+| `check_auth` | — | Роль пользователя по `tg_id` |
+| `check_reception` | `order_id` | Проверка заказа перед приёмкой |
+| `save_reception` | `order_id`, `d0`=ячейка | Записать приёмку |
+| `find_issuance` | `order_id` | Найти ячейку хранения для выдачи |
+| `save_issuance` | `order_id`, `d1`=row | Записать выдачу |
+| `check_return` | `order_id` | Проверка заказа перед возвратом |
+| `save_return` | `order_id`, `d0`=причина, `d1`=row | Записать возврат |
+| `get_my_orders` | — | Список заказов ПВЗ оператора |
+| `get_report` | `d0`=filter | Отчёт ТУ/РУ с фильтром |
+
+**Формат ответа:**
+```json
+// Успех
+{ "ok": true, "data": { ... } }
+
+// Ошибка
+{ "ok": false, "error": "Текст ошибки" }
+```
+
+**Почему `MimeType.TEXT` вместо `JSON` в GAS:**  
+`ContentService.MimeType.JSON` вызывает внутренний редирект GAS через Google OAuth.  
+При редиректе CORS-заголовок `Access-Control-Allow-Origin` теряется → браузер блокирует ответ.  
+`MimeType.TEXT` отдаёт ответ напрямую, без редиректа. Клиент парсит через `JSON.parse()`.
+
+---
+
+## Роли и доступ
+
+| Роль | Откуда | Что видит |
+|------|--------|----------|
+| `Оператор` | По умолчанию для всех | Только свой ПВЗ |
+| `ТУ` | Лист `Менеджеры_ПВЗ` | Все ПВЗ своего ТУ + отчёт |
+| `РУ` | Лист `Менеджеры_ПВЗ` | Все ПВЗ + отчёт |
+| `Администратор` | Лист `Менеджеры_ПВЗ` | Всё |
+
+Обычные операторы **не вносятся** в таблицу — они выбирают ПВЗ при первом входе,  
+выбор сохраняется в `localStorage`. Серверу передаётся `tg_id` + выбранный `pvz`.
+
+---
+
+## Быстрый старт
+
+### 1. Бэкенд (Google Apps Script)
+
+В таблице ПВЗ → Расширения → Apps Script:
+
+```
+1. Добавить файл PVZ_WebApp.gs
+2. Развернуть → Новое развёртывание
+   Тип: Веб-приложение
+   Выполнять как: Я (владелец)
+   Доступ: Все
+3. Скопировать URL развёртывания
+```
+
+### 2. Фронтенд
+
+```bash
+# Клонировать репо
+git clone https://github.com/YOUR_USERNAME/pvz-miniapp.git
+cd pvz-miniapp
+```
+
+Открыть `pvz_miniapp.html`, найти строку ~496:
+
+```javascript
+const API_URL = "ВСТАВЬТЕ_URL_GAS_WEB_APP";
+//               ↑ вставить URL из шага 1
+```
+
+```bash
+# Переименовать и загрузить
+mv pvz_miniapp.html index.html
+git add index.html
+git commit -m "feat: add PVZ Mini App"
+git push
+```
+
+```
+GitHub → Settings → Pages → Branch: main → Save
+Приложение доступно по: https://YOUR_USERNAME.github.io/pvz-miniapp/
+```
+
+### 3. Подключить к Telegram-боту
+
+```
+@BotFather → /mybots → ваш бот →
+Bot Settings → Menu Button →
+  URL:  https://YOUR_USERNAME.github.io/pvz-miniapp/
+  Text: Открыть ПВЗ
+```
+
+### 4. Добавить ТУ/РУ (опционально)
+
+В таблице ПВЗ → лист `Менеджеры_ПВЗ`:
+
+| Telegram ID | Роль | Имя |
+|-------------|------|-----|
+| 123456789 | ТУ | Иванов И. |
+| 987654321 | РУ | Петров П. |
+
+---
+
+## Зависимости
+
+| Библиотека | Версия | Назначение |
+|-----------|--------|-----------|
+| [Telegram Web App JS](https://telegram.org/js/telegram-web-app.js) | latest | Интеграция с Telegram, тема, haptic |
+| [jsQR](https://unpkg.com/jsqr@1.4.0/dist/jsQR.js) | 1.4.0 | Распознавание QR-кодов с камеры |
+
+Обе библиотеки подключаются через CDN — никакого `npm install`.
+
+---
+
+## Браузерная совместимость
+
+| Среда | Поддержка |
+|-------|----------|
+| Telegram Android | ✅ |
+| Telegram iOS | ✅ |
+| Telegram Desktop | ✅ (камера через браузер) |
+| Обычный браузер (для отладки) | ✅ (`tg_id` = `TEST_ID`) |
+
+---
+
+## Отладка
+
+**Открыть вне Telegram (в браузере):**  
+Приложение работает — `tg_id` автоматически подставляется как `TEST_ID`.  
+Проверка API напрямую:
+
+```
+https://script.google.com/macros/.../exec?action=check_auth&tg_id=test&pvz=
+→ {"ok":true,"data":{"role":"Оператор","name":"","isManager":false}}
+```
+
+**Частые ошибки:**
+
+| Ошибка | Причина | Решение |
+|--------|---------|---------|
+| CORS blocked | Старое развёртывание GAS | Создать **новое** развёртывание, обновить `API_URL` |
+| Пустой ответ | GAS упал с ошибкой, вернул HTML | Открыть URL напрямую в браузере, прочитать ошибку |
+| Камера не работает | Нет разрешений | Настройки телефона → Telegram → Разрешения → Камера |
+| `jsQR is not defined` | CDN недоступен | Проверить `https://unpkg.com/jsqr@1.4.0/dist/jsQR.js` |
