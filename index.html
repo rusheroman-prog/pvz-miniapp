@@ -347,7 +347,7 @@
         <div class="scan-overlay"><div class="scan-frame"></div></div>
       </div>
       <div style="display:flex;gap:8px">
-        <input type="text" class="field-input" id="recOrderInput" placeholder="Номер заказа"
+        <input type="text" class="field-input" id="recOrderInput" placeholder="Номер заказа" inputmode="numeric"
                onkeypress="if(event.key==='Enter')checkReception()">
         <button class="btn" style="width:auto;margin:0;padding:0 16px"
                 onclick="toggleCamera('rec')">📷</button>
@@ -385,7 +385,7 @@
         <div class="scan-overlay"><div class="scan-frame"></div></div>
       </div>
       <div style="display:flex;gap:8px">
-        <input type="text" class="field-input" id="issOrderInput" placeholder="Номер заказа"
+        <input type="text" class="field-input" id="issOrderInput" placeholder="Номер заказа" inputmode="numeric"
                onkeypress="if(event.key==='Enter')findIssuance()">
         <button class="btn" style="width:auto;margin:0;padding:0 16px"
                 onclick="toggleCamera('iss')">📷</button>
@@ -424,7 +424,7 @@
         <div class="scan-overlay"><div class="scan-frame"></div></div>
       </div>
       <div style="display:flex;gap:8px">
-        <input type="text" class="field-input" id="retOrderInput" placeholder="Номер заказа"
+        <input type="text" class="field-input" id="retOrderInput" placeholder="Номер заказа" inputmode="numeric"
                onkeypress="if(event.key==='Enter')checkReturn()">
         <button class="btn" style="width:auto;margin:0;padding:0 16px"
                 onclick="toggleCamera('ret')">📷</button>
@@ -513,7 +513,9 @@ const state = {
   issRow:    null,
   retRow:    null,
   selectedReason: "",
-  cameras: { rec: null, iss: null, ret: null },
+  cameras:   { rec: null, iss: null, ret: null },
+  // [FIX-3] RAF IDs для явной отмены анимации при остановке камеры
+  rafIds:    { rec: null, iss: null, ret: null },
 };
 
 // ══════════════════════════════════════════
@@ -543,16 +545,22 @@ async function showOnboard() {
   renderPvzList(state.allPvz);
 }
 
+// [FIX-5] Debounce: не перерисовываем список на каждое нажатие клавиши
+let pvzDebounceTimer = null;
 function filterPvzList(q) {
-  const filtered = state.allPvz.filter(p => p.toLowerCase().includes(q.toLowerCase()));
-  renderPvzList(filtered);
+  clearTimeout(pvzDebounceTimer);
+  pvzDebounceTimer = setTimeout(() => {
+    const filtered = state.allPvz.filter(p => p.toLowerCase().includes(q.toLowerCase()));
+    renderPvzList(filtered);
+  }, 250);
 }
 
 function renderPvzList(list) {
   const el = document.getElementById("pvzList");
   if (!list.length) { el.innerHTML = '<div class="loader">Не найдено</div>'; return; }
+  // [FIX-4] Экранируем значения ПВЗ
   el.innerHTML = list.map(pvz =>
-    `<div class="pvz-item" onclick="registerAndGo('${pvz}')">${pvz}</div>`
+    `<div class="pvz-item" onclick="registerAndGo('${esc(pvz)}')">${esc(pvz)}</div>`
   ).join('');
 }
 
@@ -653,19 +661,24 @@ function scanLoop(prefix, video, input) {
         input.value = code.data.trim();
         stopCamera(prefix);
         tg.HapticFeedback.impactOccurred("medium");
-        // Авто-проверка после скана
         if (prefix === "rec") checkReception();
         if (prefix === "iss") findIssuance();
         if (prefix === "ret") checkReturn();
         return;
       }
     }
-    requestAnimationFrame(tick);
+    // [FIX-3] Сохраняем ID чтобы явно отменить при stopCamera
+    state.rafIds[prefix] = requestAnimationFrame(tick);
   }
   tick();
 }
 
 function stopCamera(prefix) {
+  // [FIX-3] Явная отмена RAF — предотвращает утечку памяти на слабых телефонах
+  if (state.rafIds[prefix]) {
+    cancelAnimationFrame(state.rafIds[prefix]);
+    state.rafIds[prefix] = null;
+  }
   if (state.cameras[prefix]) {
     state.cameras[prefix].getTracks().forEach(t => t.stop());
     state.cameras[prefix] = null;
@@ -850,13 +863,14 @@ const STATUS_DOT = {
 function renderOrders(orders) {
   const el = document.getElementById("ordersList");
   if (!orders.length) { el.innerHTML = '<div class="loader">Нет заказов</div>'; return; }
+  // [FIX-4] Все данные из таблицы экранируются через esc()
   el.innerHTML = orders.map(o => `
     <div class="order-item">
       <div class="order-status-dot" style="background:${STATUS_DOT[o.status]||'#ccc'}"></div>
       <div class="order-info">
-        <div class="order-id">${o.orderId}</div>
-        <div class="order-meta">${o.status} · ${o.phone}</div>
-        ${o.cell ? `<div class="order-cell">Ячейка: ${o.cell}</div>` : ''}
+        <div class="order-id">${esc(o.orderId)}</div>
+        <div class="order-meta">${esc(o.status)} · ${esc(o.phone)}</div>
+        ${o.cell ? `<div class="order-cell">Ячейка: ${esc(o.cell)}</div>` : ''}
       </div>
     </div>
   `).join('');
@@ -899,18 +913,19 @@ const BADGE = {
 function renderReport(rows) {
   const el = document.getElementById("reportList");
   if (!rows.length) { el.innerHTML = '<div class="loader">Нет данных</div>'; return; }
+  // [FIX-4] Все данные из таблицы экранируются через esc()
   el.innerHTML = rows.map(r => {
     const [bc, bt] = BADGE[r.statusRec] || ["badge-waiting","—"];
     return `
       <div class="report-row">
         <div class="rr-order">
-          ${r.orderId}
+          ${esc(r.orderId)}
           <span class="status-badge ${bc}">${bt}</span>
           ${r.statusIss === "Выдан" ? '<span class="status-badge badge-issued">Выдан</span>' : ''}
           ${r.statusRet === "Возврат" ? '<span class="status-badge badge-returned">Возврат</span>' : ''}
         </div>
-        <div class="rr-meta">${r.pvz} · ${r.phone} · ${r.createdAt}</div>
-        ${r.reason ? `<div class="rr-meta">Причина: ${r.reason}</div>` : ''}
+        <div class="rr-meta">${esc(r.pvz)} · ${esc(r.phone)} · ${esc(r.createdAt)}</div>
+        ${r.reason ? `<div class="rr-meta">Причина: ${esc(r.reason)}</div>` : ''}
       </div>
     `;
   }).join('');
@@ -919,6 +934,17 @@ function renderReport(rows) {
 // ══════════════════════════════════════════
 // УТИЛИТЫ
 // ══════════════════════════════════════════
+
+// [FIX-4] XSS: экранируем все данные из Google Sheets перед вставкой в innerHTML
+function esc(str) {
+  return String(str || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 async function api(action, extra) {
   try {
     if (API_URL.includes("ВСТАВЬТЕ")) {
@@ -926,28 +952,32 @@ async function api(action, extra) {
       return {};
     }
 
-    // Базовые параметры
     const params = {
       action,
       tg_id: state.tgId,
       pvz:   state.pvzCode || "",
     };
 
-    // Маппинг дополнительных параметров в d0/d1/d2
-    // GAS принимает только URL-параметры (GET), без body
     if (extra) {
       if (extra.order_id !== undefined) params.order_id = extra.order_id;
       if (extra.cell     !== undefined) params.d0 = extra.cell;
       if (extra.reason   !== undefined) params.d0 = extra.reason;
       if (extra.filter   !== undefined) params.d0 = extra.filter;
-      if (extra.row      !== undefined) params.d1 = extra.row;
+      // [FIX-1] row может быть объектом — сериализуем в JSON
+      if (extra.row      !== undefined) params.d1 = JSON.stringify(extra.row);
     }
 
     const url  = API_URL + "?" + new URLSearchParams(params).toString();
     const resp = await fetch(url, { method: "GET", redirect: "follow" });
 
-    const text = await resp.text();
+    // [FIX-2] Проверяем HTTP-статус до парсинга
+    if (!resp.ok) {
+      console.error("HTTP Error:", resp.status, resp.statusText);
+      tg.showAlert("Сбой сети или ошибка сервера (" + resp.status + "). Попробуйте позже.");
+      return {};
+    }
 
+    const text = await resp.text();
     if (!text || !text.trim()) {
       console.error("API пустой ответ:", action);
       return {};
