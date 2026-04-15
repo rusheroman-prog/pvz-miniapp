@@ -649,8 +649,20 @@ function scanLoop(prefix, video, input) {
   const canvas = document.createElement("canvas");
   const ctx    = canvas.getContext("2d");
 
-  function tick() {
+  // Троттлинг: jsQR запускается не чаще 4 раз/сек (каждые 250 мс)
+  // Без этого — нагрев телефона и зависание кнопок на бюджетных устройствах
+  let lastScanTime = 0;
+
+  function tick(now) {
     if (!state.cameras[prefix]) return;
+
+    // Планируем следующий кадр сразу — RAF продолжает работать
+    state.rafIds[prefix] = requestAnimationFrame(tick);
+
+    // Пропускаем кадр если прошло меньше 250 мс с последнего скана
+    if (now - lastScanTime < 250) return;
+    lastScanTime = now;
+
     if (video.readyState === video.HAVE_ENOUGH_DATA) {
       canvas.width  = video.videoWidth;
       canvas.height = video.videoHeight;
@@ -664,13 +676,10 @@ function scanLoop(prefix, video, input) {
         if (prefix === "rec") checkReception();
         if (prefix === "iss") findIssuance();
         if (prefix === "ret") checkReturn();
-        return;
       }
     }
-    // [FIX-3] Сохраняем ID чтобы явно отменить при stopCamera
-    state.rafIds[prefix] = requestAnimationFrame(tick);
   }
-  tick();
+  state.rafIds[prefix] = requestAnimationFrame(tick);
 }
 
 function stopCamera(prefix) {
