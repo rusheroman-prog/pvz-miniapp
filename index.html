@@ -141,12 +141,27 @@
       pointer-events: none;
     }
     .scan-frame {
-      /* Рамка = 55% ширины но не больше 180px */
       width: min(55vw, 180px);
       height: min(55vw, 180px);
       border: 3px solid rgba(255,255,255,0.9);
       border-radius: 14px;
       box-shadow: 0 0 0 9999px rgba(0,0,0,0.45);
+      position: relative;
+      overflow: hidden;
+    }
+    /* Лазерная полоска — показывает что камера активна и сканирует */
+    .scan-frame::after {
+      content: "";
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%; height: 2px;
+      background: var(--green);
+      box-shadow: 0 0 8px var(--green);
+      animation: scanLaser 2s infinite linear alternate;
+    }
+    @keyframes scanLaser {
+      0%   { transform: translateY(0); }
+      100% { transform: translateY(min(55vw, 180px)); }
     }
     .scan-hint {
       text-align: center; font-size: 13px;
@@ -444,7 +459,8 @@
           <button class="reason-btn" onclick="selectReason(this,'Ошибка адреса')">Ошибка адреса</button>
         </div>
         <input type="text" class="field-input" id="retCustomReason"
-               placeholder="Другая причина..." style="margin-top:8px">
+               placeholder="Другая причина..." style="margin-top:8px"
+               oninput="clearSelectedReasons()">
         <button class="btn danger" onclick="saveReturn()" style="margin-top:12px">
           ↩️ Оформить возврат
         </button>
@@ -609,12 +625,23 @@ async function loadCounts() {
 // НАВИГАЦИЯ
 // ══════════════════════════════════════════
 function goTo(name) {
+  // Лёгкая вибрация при навигации — интерфейс ощущается живым
+  if (tg.HapticFeedback) tg.HapticFeedback.impactOccurred("light");
+
   stopAllCameras();
   document.querySelectorAll(".screen").forEach(s => s.classList.remove("active"));
   document.getElementById("screen-" + name).classList.add("active");
 
   if (name === "orders") loadOrders();
   if (name === "report") loadReport("all");
+
+  // Автофокус для аппаратных сканеров (Bluetooth/USB) — эмулируют клавиатуру
+  // Небольшая задержка нужна чтобы экран успел отрисоваться
+  setTimeout(() => {
+    if (name === "reception") document.getElementById("recOrderInput")?.focus();
+    if (name === "issuance")  document.getElementById("issOrderInput")?.focus();
+    if (name === "return")    document.getElementById("retOrderInput")?.focus();
+  }, 100);
 }
 
 // ══════════════════════════════════════════
@@ -683,7 +710,6 @@ function scanLoop(prefix, video, input) {
 }
 
 function stopCamera(prefix) {
-  // [FIX-3] Явная отмена RAF — предотвращает утечку памяти на слабых телефонах
   if (state.rafIds[prefix]) {
     cancelAnimationFrame(state.rafIds[prefix]);
     state.rafIds[prefix] = null;
@@ -691,6 +717,9 @@ function stopCamera(prefix) {
   if (state.cameras[prefix]) {
     state.cameras[prefix].getTracks().forEach(t => t.stop());
     state.cameras[prefix] = null;
+    // Очищаем srcObject — iOS WebKit иначе держит последний кадр в памяти
+    const vid = document.getElementById(prefix + "Video");
+    if (vid) vid.srcObject = null;
   }
   const wrap = document.getElementById(prefix + "ScanWrap");
   if (wrap) wrap.style.display = "none";
@@ -819,6 +848,12 @@ function selectReason(btn, reason) {
   document.getElementById("retCustomReason").value = "";
 }
 
+// Сброс выбранных кнопок когда оператор начинает вводить свою причину
+function clearSelectedReasons() {
+  document.querySelectorAll(".reason-btn").forEach(b => b.classList.remove("selected"));
+  state.selectedReason = "";
+}
+
 async function saveReturn() {
   const orderId = document.getElementById("retOrderInput").value.trim();
   const custom  = document.getElementById("retCustomReason").value.trim();
@@ -871,7 +906,15 @@ const STATUS_DOT = {
 
 function renderOrders(orders) {
   const el = document.getElementById("ordersList");
-  if (!orders.length) { el.innerHTML = '<div class="loader">Нет заказов</div>'; return; }
+  if (!orders.length) {
+    el.innerHTML = `
+      <div style="text-align:center;padding:40px 20px;color:var(--tg-hint)">
+        <div style="font-size:40px;margin-bottom:12px">📭</div>
+        <div style="font-size:15px;font-weight:500">Заказов пока нет</div>
+        <div style="font-size:13px;margin-top:6px">Они появятся после приёмки</div>
+      </div>`;
+    return;
+  }
   // [FIX-4] Все данные из таблицы экранируются через esc()
   el.innerHTML = orders.map(o => `
     <div class="order-item">
@@ -921,7 +964,15 @@ const BADGE = {
 
 function renderReport(rows) {
   const el = document.getElementById("reportList");
-  if (!rows.length) { el.innerHTML = '<div class="loader">Нет данных</div>'; return; }
+  if (!rows.length) {
+    el.innerHTML = `
+      <div style="text-align:center;padding:40px 20px;color:var(--tg-hint)">
+        <div style="font-size:40px;margin-bottom:12px">📊</div>
+        <div style="font-size:15px;font-weight:500">Нет данных для отображения</div>
+        <div style="font-size:13px;margin-top:6px">Попробуйте другой фильтр</div>
+      </div>`;
+    return;
+  }
   // [FIX-4] Все данные из таблицы экранируются через esc()
   el.innerHTML = rows.map(r => {
     const [bc, bt] = BADGE[r.statusRec] || ["badge-waiting","—"];
