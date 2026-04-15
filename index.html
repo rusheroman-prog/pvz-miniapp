@@ -210,18 +210,50 @@
     .input-camera-row .cam-btn:active { opacity: 0.8; }
 
     /* ── Список заказов ─────────────────────────────────────── */
+    /* ── Заказы ─────────────────────────────────────────────── */
+    .search-row { padding: 0 4px 12px; }
+
+    .cell-badge {
+      display: inline-block;
+      background: rgba(0,122,255,0.1);
+      color: var(--blue);
+      padding: 4px 8px;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 700;
+      margin-top: 4px;
+      border: 1px solid rgba(0,122,255,0.2);
+    }
+
     .order-item {
       background: var(--tg-second);
       border-radius: var(--radius); padding: 12px 14px;
       margin-bottom: 8px; cursor: pointer;
-      display: flex; align-items: center; gap: 12px;
+      display: flex; flex-direction: column; align-items: stretch;
+      transition: all 0.2s;
     }
     .order-item:active { opacity: 0.7; }
+    .order-item-header { display: flex; align-items: center; gap: 12px; width: 100%; }
     .order-status-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
     .order-info { flex: 1; }
     .order-id   { font-weight: 600; font-size: 15px; }
     .order-meta { font-size: 13px; color: var(--tg-hint); margin-top: 2px; }
-    .order-cell { font-size: 12px; font-weight: 600; color: var(--tg-btn); }
+
+    .order-actions {
+      display: none;
+      gap: 8px;
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px dashed rgba(0,0,0,0.1);
+    }
+    .order-item.expanded .order-actions { display: flex; }
+
+    .action-btn {
+      flex: 1; padding: 10px; border-radius: 8px; border: none;
+      font-size: 13px; font-weight: 600; cursor: pointer; text-align: center;
+    }
+    .action-btn.issue  { background: var(--green); color: white; }
+    .action-btn.return { background: #ffebee; color: var(--red); }
 
     /* ── Отчёт ──────────────────────────────────────────────── */
     .stat-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-bottom: 16px; }
@@ -476,11 +508,16 @@
     <h1>📋 Мои заказы</h1>
   </div>
   <div class="content">
+    <div class="search-row">
+      <input type="text" class="field-input" id="orderSearchInput"
+             placeholder="Поиск по номеру заказа или телефону..."
+             oninput="applyOrderFilters()" inputmode="search">
+    </div>
     <div class="filter-row">
-      <button class="filter-btn active" onclick="filterOrders('all',this)">Все</button>
-      <button class="filter-btn" onclick="filterOrders('waiting',this)">Ожидают приёмки</button>
-      <button class="filter-btn" onclick="filterOrders('stored',this)">На хранении</button>
-      <button class="filter-btn" onclick="filterOrders('issued',this)">Выданы</button>
+      <button class="filter-btn active" onclick="setOrderTab('all', this)">Все</button>
+      <button class="filter-btn" onclick="setOrderTab('waiting', this)">Ожидают</button>
+      <button class="filter-btn" onclick="setOrderTab('stored', this)">На хранении</button>
+      <button class="filter-btn" onclick="setOrderTab('issued', this)">Выданы</button>
     </div>
     <div id="ordersList"><div class="loader"><div class="spinner"></div>Загрузка...</div></div>
   </div>
@@ -879,26 +916,70 @@ async function saveReturn() {
 // ══════════════════════════════════════════
 // СПИСОК ЗАКАЗОВ
 // ══════════════════════════════════════════
+let currentOrderTab = 'all';
+
 async function loadOrders() {
   document.getElementById("ordersList").innerHTML =
     '<div class="loader"><div class="spinner"></div>Загрузка...</div>';
+  document.getElementById("orderSearchInput").value = "";
   const res = await api("get_my_orders");
   state.allOrders = res.orders || [];
-  renderOrders(state.allOrders);
+  applyOrderFilters();
 }
 
-function filterOrders(filter, btn) {
-  document.querySelectorAll(".filter-row .filter-btn").forEach(b => b.classList.remove("active"));
+function setOrderTab(filter, btn) {
+  document.querySelectorAll("#screen-orders .filter-row .filter-btn")
+    .forEach(b => b.classList.remove("active"));
   btn.classList.add("active");
+  currentOrderTab = filter;
+  applyOrderFilters();
+}
+
+// Комбинированная фильтрация: таб + поиск по ID или телефону
+function applyOrderFilters() {
+  const query = document.getElementById("orderSearchInput").value.toLowerCase().trim();
   let filtered = state.allOrders;
-  if (filter === "waiting") filtered = state.allOrders.filter(o => o.status === "Ожидает приёмки");
-  if (filter === "stored")  filtered = state.allOrders.filter(o => o.status === "На хранении");
-  if (filter === "issued")  filtered = state.allOrders.filter(o => o.status === "Выдан");
+
+  if (currentOrderTab === "waiting") filtered = filtered.filter(o => o.status === "Ожидает приёмки");
+  if (currentOrderTab === "stored")  filtered = filtered.filter(o => o.status === "На хранении");
+  if (currentOrderTab === "issued")  filtered = filtered.filter(o => o.status === "Выдан");
+
+  if (query) {
+    filtered = filtered.filter(o =>
+      (o.orderId && String(o.orderId).toLowerCase().includes(query)) ||
+      (o.phone   && String(o.phone).toLowerCase().includes(query))
+    );
+  }
+
   renderOrders(filtered);
 }
 
+// Аккордеон: разворачивает карточку, закрывает остальные
+function toggleOrderDetails(element) {
+  if (tg.HapticFeedback) tg.HapticFeedback.selectionChanged();
+  document.querySelectorAll(".order-item.expanded").forEach(el => {
+    if (el !== element) el.classList.remove("expanded");
+  });
+  element.classList.toggle("expanded");
+}
+
+// Быстрый переход на выдачу или возврат с подставленным номером
+function quickAction(action, orderId, event) {
+  event.stopPropagation();
+  goTo(action);
+  setTimeout(() => {
+    if (action === "issuance") {
+      document.getElementById("issOrderInput").value = orderId;
+      findIssuance();
+    } else if (action === "return") {
+      document.getElementById("retOrderInput").value = orderId;
+      checkReturn();
+    }
+  }, 200);
+}
+
 const STATUS_DOT = {
-  "Ожидает приёмки": "#999",
+  "Ожидает приёмки": "#999999",
   "На хранении":     "#ff9500",
   "Выдан":           "#34c759",
   "Возврат":         "#ff3b30",
@@ -910,22 +991,35 @@ function renderOrders(orders) {
     el.innerHTML = `
       <div style="text-align:center;padding:40px 20px;color:var(--tg-hint)">
         <div style="font-size:40px;margin-bottom:12px">📭</div>
-        <div style="font-size:15px;font-weight:500">Заказов пока нет</div>
-        <div style="font-size:13px;margin-top:6px">Они появятся после приёмки</div>
+        <div style="font-size:15px;font-weight:500">Ничего не найдено</div>
+        <div style="font-size:13px;margin-top:6px">Попробуйте изменить поиск или фильтр</div>
       </div>`;
     return;
   }
-  // [FIX-4] Все данные из таблицы экранируются через esc()
-  el.innerHTML = orders.map(o => `
-    <div class="order-item">
-      <div class="order-status-dot" style="background:${STATUS_DOT[o.status]||'#ccc'}"></div>
-      <div class="order-info">
-        <div class="order-id">${esc(o.orderId)}</div>
-        <div class="order-meta">${esc(o.status)} · ${esc(o.phone)}</div>
-        ${o.cell ? `<div class="order-cell">Ячейка: ${esc(o.cell)}</div>` : ''}
-      </div>
-    </div>
-  `).join('');
+
+  el.innerHTML = orders.map(o => {
+    const isStored  = o.status === "На хранении";
+    const actionsHtml = isStored ? `
+      <div class="order-actions">
+        <button class="action-btn issue"
+                onclick="quickAction('issuance','${esc(o.orderId)}',event)">📤 Выдать</button>
+        <button class="action-btn return"
+                onclick="quickAction('return','${esc(o.orderId)}',event)">↩️ Возврат</button>
+      </div>` : '';
+
+    return `
+      <div class="order-item" onclick="toggleOrderDetails(this)">
+        <div class="order-item-header">
+          <div class="order-status-dot" style="background:${STATUS_DOT[o.status]||'#ccc'}"></div>
+          <div class="order-info">
+            <div class="order-id">${esc(o.orderId)}</div>
+            <div class="order-meta">${esc(o.status)} · ${esc(o.phone)}</div>
+            ${o.cell ? `<div class="cell-badge">📦 Ячейка: ${esc(o.cell)}</div>` : ''}
+          </div>
+        </div>
+        ${actionsHtml}
+      </div>`;
+  }).join('');
 }
 
 // ══════════════════════════════════════════
